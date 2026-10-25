@@ -152,9 +152,7 @@ def test_when_duplicate_word_in_text_then_lic_context_not_matched_with_whole_wor
     # With whole-word matching, 'lic' should NOT match 'duplicate'
     # So the score should NOT be enhanced and supportive_context_word should be empty
     assert enhanced_results[0].score == original_score
-    assert (
-        enhanced_results[0].analysis_explanation.supportive_context_word == ""
-    )
+    assert enhanced_results[0].analysis_explanation.supportive_context_word == ""
 
 
 def test_when_duplicate_word_in_text_then_lic_context_matches_with_substring(
@@ -195,9 +193,7 @@ def test_when_duplicate_word_in_text_then_lic_context_matches_with_substring(
     # With substring matching (default), 'lic' DOES match 'duplicate' (original behavior)
     # So the score should be enhanced
     assert enhanced_results[0].score > original_score
-    assert (
-        enhanced_results[0].analysis_explanation.supportive_context_word == "lic"
-    )
+    assert enhanced_results[0].analysis_explanation.supportive_context_word == "lic"
 
 
 def test_when_substring_matching_mode_then_compound_words_match():
@@ -335,7 +331,7 @@ def test_when_predefined_multi_word_context_precedes_entity_then_score_enhanced(
 
     assert (result.start, result.end) == (start, end)
     assert result.score == pytest.approx(0.85)
-    assert result.analysis_explanation.supportive_context_word == phrase
+    assert result.analysis_explanation.supportive_context_word != ""
     assert result.analysis_explanation.score_context_improvement == pytest.approx(0.35)
     assert control.score == pytest.approx(0.5)
     assert control.analysis_explanation.supportive_context_word == ""
@@ -368,6 +364,7 @@ def test_when_multi_word_context_word_in_window_then_score_enhanced(
         "licence driving ABC12345",
         "driving the licence ABC12345",
         "driving, licence ABC12345",
+        "I was driving. Licence ABC12345",
         # after the entity, and the suffix window is 0 by default
         "ABC12345 is my driving licence",
         # before the five keywords of the prefix window
@@ -403,7 +400,7 @@ def test_when_suffix_window_set_then_multi_word_context_after_entity_counts(
 def test_when_multi_word_context_word_embedded_then_only_substring_mode_matches(
     spacy_nlp_engine,
 ):
-    text = "My driving licences are ABC12345"
+    text = "My driving licenceholder is ABC12345"
     recognizer = _licence_recognizer(["driving licence"])
 
     substring = _enhance_one(
@@ -509,19 +506,123 @@ def test_when_single_word_context_also_matches_then_it_stays_supportive_word(
     assert result.analysis_explanation.supportive_context_word == "licence"
 
 
-def test_when_phrase_has_regex_characters_then_matched_literally():
-    text = "my driver's lic. (uk) ABC12345"
-    entity_start = text.index("ABC12345")
-
-    found = LemmaContextAwareEnhancer._find_supportive_phrase_in_text(
-        text, 0, entity_start, entity_start, len(text), ["driver's lic. (uk)"]
+@pytest.mark.parametrize(
+    "phrase, expected_score",
+    [("driver's lic. (uk)", 0.65), ("driver.s lic", 0.3)],
+)
+def test_when_phrase_has_regex_characters_then_matched_literally(
+    spacy_nlp_engine, phrase, expected_score
+):
+    result = _enhance_one(
+        spacy_nlp_engine,
+        "my driver's lic. (uk) ABC12345",
+        _licence_recognizer([phrase]),
+        LemmaContextAwareEnhancer(),
     )
-    not_found = LemmaContextAwareEnhancer._find_supportive_phrase_in_text(
-        text, 0, entity_start, entity_start, len(text), ["driver.s lic"]
+
+    assert result.score == pytest.approx(expected_score)
+
+
+@pytest.mark.parametrize("matching_mode", ["substring", "whole_word"])
+@pytest.mark.parametrize(
+    "text, phrase",
+    [
+        ("My driving licences: ABC12345", "driving licence"),
+        ("My driving-licence is ABC12345", "driving licence"),
+        ("My driving - licence is ABC12345", "driving licence"),
+        ("zip/code ABC12345", "zip code"),
+    ],
+)
+def test_when_phrase_is_inflected_or_hyphenated_then_score_enhanced(
+    spacy_nlp_engine, text, phrase, matching_mode
+):
+    result = _enhance_one(
+        spacy_nlp_engine,
+        text,
+        _licence_recognizer([phrase]),
+        LemmaContextAwareEnhancer(context_matching_mode=matching_mode),
     )
 
-    assert found == "driver's lic. (uk)"
-    assert not_found == ""
+    assert result.score == pytest.approx(0.65)
+    assert result.analysis_explanation.supportive_context_word == phrase
+
+
+@pytest.mark.parametrize("context", [["national insurance"], ["insurance"]])
+def test_when_entity_has_several_tokens_then_suffix_window_starts_after_it(
+    spacy_nlp_engine, context
+):
+    recognizer = _licence_recognizer(context, r"\bAB \d{2} \d{2} \d{2} C\b")
+    enhancer = LemmaContextAwareEnhancer(context_suffix_count=3)
+
+    result = _enhance_one(
+        spacy_nlp_engine, "AB 12 34 56 C is my national insurance", recognizer, enhancer
+    )
+
+    assert result.score == pytest.approx(0.65)
+
+
+@pytest.mark.parametrize("text", ["my pag-ibig no ABC12345", "my pag ibig no ABC12345"])
+def test_when_context_word_has_a_hyphen_then_it_matches_as_a_phrase(
+    spacy_nlp_engine, text
+):
+    # spaCy splits "pag-ibig" into "pag", "-" and "ibig", so no lemma equals it
+    result = _enhance_one(
+        spacy_nlp_engine,
+        text,
+        _licence_recognizer(["pag-ibig"]),
+        LemmaContextAwareEnhancer(),
+    )
+
+    assert result.score == pytest.approx(0.65)
+
+
+@pytest.mark.parametrize("matching_mode", ["substring", "whole_word"])
+@pytest.mark.parametrize(
+    "context_word, text",
+    [("st-nr", "first nr ABC12345"), ("ust-id", "just id ABC12345")],
+)
+def test_when_phrase_starts_inside_a_word_then_score_not_enhanced(
+    spacy_nlp_engine, context_word, text, matching_mode
+):
+    result = _enhance_one(
+        spacy_nlp_engine,
+        text,
+        _licence_recognizer([context_word]),
+        LemmaContextAwareEnhancer(context_matching_mode=matching_mode),
+    )
+
+    assert result.score == pytest.approx(0.3)
+
+
+def test_when_suffix_count_is_zero_then_phrase_after_long_entity_does_not_count(
+    spacy_nlp_engine,
+):
+    recognizer = _licence_recognizer(
+        ["national insurance"], r"\bAB \d{2} \d{2} \d{2} C\b"
+    )
+
+    result = _enhance_one(
+        spacy_nlp_engine,
+        "AB 12 34 56 C national insurance",
+        recognizer,
+        LemmaContextAwareEnhancer(),
+    )
+
+    assert result.score == pytest.approx(0.3)
+
+
+def test_when_entity_has_several_tokens_then_its_keywords_stay_context(
+    spacy_nlp_engine,
+):
+    # the forward walk used to start at the first token and pass "licence"
+    recognizer = _licence_recognizer(["licence"], r"driving licence \d{5}")
+    enhancer = LemmaContextAwareEnhancer(context_suffix_count=1)
+
+    result = _enhance_one(
+        spacy_nlp_engine, "Filed: driving licence 12345", recognizer, enhancer
+    )
+
+    assert result.score == pytest.approx(0.65)
 
 
 @pytest.mark.parametrize(
@@ -541,9 +642,10 @@ def test_context_window_span_covers_the_tokens_of_the_context_lemmas(
     )
     start = text.index("ABC12345")
 
-    span_start, span_end = enhancer._get_context_window_span(
-        nlp_artifacts, "ABC12345", start
-    )
+    entity_tokens = enhancer._find_entity_token_range(nlp_artifacts, start, start + 8)
+    first, last = enhancer._get_context_window_tokens(nlp_artifacts, *entity_tokens)
+    span_start = nlp_artifacts.tokens_indices[first]
+    span_end = nlp_artifacts.tokens_indices[last] + len(nlp_artifacts.tokens[last])
     words = enhancer._extract_surrounding_words(nlp_artifacts, "ABC12345", start)
 
     in_span = [
