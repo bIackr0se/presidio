@@ -528,6 +528,9 @@ def test_when_phrase_has_regex_characters_then_matched_literally(
     "text, phrase",
     [
         ("My driving licences: ABC12345", "driving licence"),
+        ("My driving  licences: ABC12345", "driving licence"),
+        ("My driving\tlicences: ABC12345", "driving licence"),
+        ("My driving\nlicences: ABC12345", "driving licence"),
         ("My driving-licence is ABC12345", "driving licence"),
         ("My driving - licence is ABC12345", "driving licence"),
         ("zip/code ABC12345", "zip code"),
@@ -559,6 +562,31 @@ def test_when_entity_has_several_tokens_then_suffix_window_starts_after_it(
     )
 
     assert result.score == pytest.approx(0.65)
+
+
+@pytest.mark.parametrize(
+    "regex, text, suffix_count, expected_score",
+    [
+        # the closing parenthesis is no keyword, so it takes none of the window
+        (r"\(AB \d{2} \d{2} \d{2} C\)", "(AB 12 34 56 C) unrelated insurance", 1, 0.3),
+        (r"\(AB \d{2} \d{2} \d{2} C\)", "(AB 12 34 56 C) unrelated insurance", 2, 0.65),
+        # the entity's own last token is not context after it
+        (r"AB \d{2} \d{2} \d{2} insurance", "Reference AB 12 34 56 insurance", 1, 0.3),
+    ],
+)
+def test_when_entity_has_several_tokens_then_suffix_window_counts_words_after_it(
+    spacy_nlp_engine, regex, text, suffix_count, expected_score
+):
+    result = _enhance_one(
+        spacy_nlp_engine,
+        text,
+        _licence_recognizer(["insurance"], regex),
+        LemmaContextAwareEnhancer(
+            context_suffix_count=suffix_count, context_matching_mode="whole_word"
+        ),
+    )
+
+    assert result.score == pytest.approx(expected_score)
 
 
 @pytest.mark.parametrize("text", ["my pag-ibig no ABC12345", "my pag ibig no ABC12345"])

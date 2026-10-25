@@ -53,9 +53,9 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
     A context word that contains whitespace (e.g. 'driving licence') cannot equal
     a single lemma, so when no context word matches, such phrases are also looked
     up in the original text of the context window, outside the entity itself.
-    For an entity of several tokens, when no context word matches, the suffix
-    window is also counted from its last token, so the entity's own tokens do
-    not use it up.
+    For an entity of several tokens, when no context word matches, the
+    `context_suffix_count` keywords after its last token also count, so the
+    entity's own tokens do not use up the suffix window.
 
     :param context_similarity_factor: How much to enhance confidence of match entity
     :param min_score_with_context_similarity: Minimum confidence score
@@ -331,11 +331,13 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
             if whole_word:
                 if window_words is None:
                     # (index, lowercase text, lowercase lemma) of each token,
-                    # without the hyphen and slash tokens a phrase gap holds
+                    # without the whitespace, hyphen and slash tokens a phrase
+                    # gap holds
                     window_words = [
                         (i, str(tokens[i]).lower(), nlp_artifacts.lemmas[i].lower())
                         for i in range(window[0], window[1] + 1)
                         if str(tokens[i]) not in ("-", "/")
+                        and not str(tokens[i]).isspace()
                     ]
                 if self._phrase_in_window_tokens(
                     text, nlp_artifacts, window_words, result, phrase
@@ -445,13 +447,23 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
                 is_backward=True,
             ),
             *self._walk_context_tokens(
-                self._get_suffix_walk_start(first, last),
+                first,
                 self.context_suffix_count,
                 nlp_artifacts.lemmas,
                 nlp_artifacts.keywords,
                 is_backward=False,
             ),
         ]
+        if self._has_words_after_entity(first, last):
+            visited.extend(
+                self._walk_context_tokens(
+                    last + 1,
+                    self.context_suffix_count - 1,
+                    nlp_artifacts.lemmas,
+                    nlp_artifacts.keywords,
+                    is_backward=False,
+                )
+            )
         if not visited:
             return None
         return min(visited), max(visited)
@@ -567,22 +579,21 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
         last = max(first, bisect_left(tokens_indices, end) - 1)
         return first, last
 
-    def _get_suffix_walk_start(self, first: int, last: int) -> int:
-        """Return the token the suffix window is counted from.
+    def _has_words_after_entity(self, first: int, last: int) -> bool:
+        """Check if the suffix window is also counted after the entity.
 
         `_extract_surrounding_words` counts it from the entity's first token, so
-        an entity of several tokens can use it up on its own tokens; the
-        fallback counts it from the entity's last token instead.
+        an entity of several tokens can use it up on its own tokens.
 
         :param first: index of the entity's first token
         :param last: index of the entity's last token
         """
-        return last if self.context_suffix_count > 0 else first
+        return last > first and self.context_suffix_count > 0
 
     def _extract_words_after_entity(
         self, nlp_artifacts: NlpArtifacts, first: int, last: int
     ) -> List[str]:
-        """Extract the suffix window lemmas counted from the entity's last token.
+        """Extract the `context_suffix_count` keywords after the entity's last token.
 
         Only consulted when the context of `_extract_surrounding_words` has no
         match, and only for an entity of several tokens.
@@ -591,11 +602,12 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
         :param first: index of the entity's first token
         :param last: index of the entity's last token
         """
-        if last == first or self.context_suffix_count <= 0:
+        if not self._has_words_after_entity(first, last):
             return []
+        # `_add_n_words` takes one keyword more, for the entity's own token
         return self._add_n_words_forward(
-            last,
-            self.context_suffix_count,
+            last + 1,
+            self.context_suffix_count - 1,
             nlp_artifacts.lemmas,
             nlp_artifacts.keywords,
         )
