@@ -19,12 +19,30 @@ _PHRASE_WORD_SEPARATOR = re.compile(r"[\s\-/]+")
 _PHRASE_GAP = r"(?:\s+|\s*[-/]\s*)"
 _PHRASE_GAP_RE = re.compile(_PHRASE_GAP)
 _WORD_CHAR = re.compile(r"\w")
+# spaCy splits a possessive "'s" off its word: "driver's" is "driver", "'s"
+_POSSESSIVE = re.compile(r"(.+?)(['\u2019]s)")
 
 
 @lru_cache(maxsize=1024)
 def _phrase_words(phrase: str) -> Tuple[str, ...]:
     """Split a context phrase into its lowercase words."""
     return tuple(word for word in _PHRASE_WORD_SEPARATOR.split(phrase.lower()) if word)
+
+
+@lru_cache(maxsize=1024)
+def _phrase_tokens(phrase: str) -> Tuple[Tuple[str, bool], ...]:
+    """Split a context phrase into the tokens spaCy splits its words into.
+
+    Each token comes with whether it joins the previous one with no gap.
+    """
+    tokens = []
+    for word in _phrase_words(phrase):
+        possessive = _POSSESSIVE.fullmatch(word)
+        if possessive:
+            tokens.extend(((possessive[1], False), (possessive[2], True)))
+        else:
+            tokens.append((word, False))
+    return tuple(tokens)
 
 
 @lru_cache(maxsize=1024)
@@ -70,9 +88,9 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
           Prevents false positives.
         A phrase matches its words in order, case-insensitively, separated by
         whitespace or by one hyphen or slash, starting at a word boundary.
-        "whole_word" also requires a word boundary after it, and also accepts
-        consecutive tokens whose text or lemma equals each word
-        ('driving licence' matches 'driving licences').
+        "whole_word" also requires a word boundary after it. In both modes a
+        phrase also matches consecutive tokens whose text or lemma equals each
+        word ('woman driver' matches 'women drivers').
     """
 
     def __init__(
@@ -302,9 +320,9 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
         Find a context word of several words in the context window.
 
         Such a phrase never equals a single lemma, so it is matched against the
-        original text of the window, and in "whole_word" mode also against the
-        text or lemma of its consecutive tokens. A match that overlaps the
-        entity itself does not count.
+        original text of the window, and also against the text or lemma of its
+        consecutive tokens. A match that overlaps the entity itself does not
+        count.
 
         :param text: the analyzed text
         :param nlp_artifacts: the NLP artifacts of the analyzed text
@@ -328,21 +346,19 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
                 text, window_start, window_end, result, phrase, whole_word
             ):
                 return phrase
-            if whole_word:
-                if window_words is None:
-                    # (index, lowercase text, lowercase lemma) of each token,
-                    # without the whitespace, hyphen and slash tokens a phrase
-                    # gap holds
-                    window_words = [
-                        (i, str(tokens[i]).lower(), nlp_artifacts.lemmas[i].lower())
-                        for i in range(window[0], window[1] + 1)
-                        if str(tokens[i]) not in ("-", "/")
-                        and not str(tokens[i]).isspace()
-                    ]
-                if self._phrase_in_window_tokens(
-                    text, nlp_artifacts, window_words, result, phrase
-                ):
-                    return phrase
+            if window_words is None:
+                # (index, lowercase text, lowercase lemma) of each token,
+                # without the whitespace, hyphen and slash tokens a phrase
+                # gap holds
+                window_words = [
+                    (i, str(tokens[i]).lower(), nlp_artifacts.lemmas[i].lower())
+                    for i in range(window[0], window[1] + 1)
+                    if str(tokens[i]) not in ("-", "/") and not str(tokens[i]).isspace()
+                ]
+            if self._phrase_in_window_tokens(
+                text, nlp_artifacts, window_words, result, phrase
+            ):
+                return phrase
         return ""
 
     @staticmethod
@@ -390,22 +406,25 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
 
         Each phrase word must equal the text or the lemma of its token (as a
         single context word equals a lemma), and only a phrase gap may lie
-        between two tokens. The tokens must not continue a word of the text on
-        either side, and must not overlap the entity.
+        between two tokens; a possessive "'s" is its own token, right after its
+        word. The tokens must not continue a word of the text on either side,
+        and must not overlap the entity.
 
         :param text: the analyzed text
         :param nlp_artifacts: the NLP artifacts of the analyzed text
         :param window_words: index, lowercase text and lowercase lemma of each
-            window token that is not a hyphen or slash
+            window token that is not whitespace, a hyphen or a slash
         :param result: the recognized entity
         :param phrase: a context word of several words
         """
-        words = _phrase_words(phrase)
+        words = _phrase_tokens(phrase)
         tokens = nlp_artifacts.tokens
         tokens_indices = nlp_artifacts.tokens_indices
         for j in range(len(window_words) - len(words) + 1):
             run = window_words[j : j + len(words)]
-            if not all(word in (t, lemma) for word, (_, t, lemma) in zip(words, run)):
+            if not all(
+                word in (t, lemma) for (word, _), (_, t, lemma) in zip(words, run)
+            ):
                 continue
             first, last = run[0][0], run[-1][0]
             run_start = tokens_indices[first]
@@ -416,11 +435,15 @@ class LemmaContextAwareEnhancer(ContextAwareEnhancer):
                 _WORD_CHAR.match(text, run_end)
             ):
                 continue
+            gaps = (
+                (tokens_indices[a] + len(tokens[a]), tokens_indices[b], joined)
+                for (a, _, _), (b, _, _), (_, joined) in zip(run, run[1:], words[1:])
+            )
             if all(
-                _PHRASE_GAP_RE.fullmatch(
-                    text, tokens_indices[a] + len(tokens[a]), tokens_indices[b]
-                )
-                for (a, _, _), (b, _, _) in zip(run, run[1:])
+                gap_start == gap_end
+                if joined
+                else _PHRASE_GAP_RE.fullmatch(text, gap_start, gap_end)
+                for gap_start, gap_end, joined in gaps
             ):
                 logger.debug("Found context phrase '%s' in tokens", phrase)
                 return True

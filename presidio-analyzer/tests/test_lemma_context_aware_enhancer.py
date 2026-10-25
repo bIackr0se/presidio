@@ -531,6 +531,8 @@ def test_when_phrase_has_regex_characters_then_matched_literally(
         ("My driving  licences: ABC12345", "driving licence"),
         ("My driving\tlicences: ABC12345", "driving licence"),
         ("My driving\nlicences: ABC12345", "driving licence"),
+        ("Two women drivers: ABC12345", "woman driver"),
+        ("My driver's licences: ABC12345", "driver's licence"),
         ("My driving-licence is ABC12345", "driving licence"),
         ("My driving - licence is ABC12345", "driving licence"),
         ("zip/code ABC12345", "zip code"),
