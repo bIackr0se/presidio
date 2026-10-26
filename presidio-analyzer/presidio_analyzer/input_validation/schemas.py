@@ -130,6 +130,8 @@ class ConfigurationValidator:
         except ValidationError as e:
             errors = "; ".join(
                 f"{'.'.join(str(loc) for loc in error['loc'])}: {error['msg']}"
+                if error["loc"]
+                else error["msg"]
                 for error in e.errors()
             )
             raise ValueError(

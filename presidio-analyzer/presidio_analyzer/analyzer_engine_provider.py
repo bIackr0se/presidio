@@ -5,7 +5,12 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 
 from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
-from presidio_analyzer.context_aware_enhancers import LemmaContextAwareEnhancer
+from presidio_analyzer.context_aware_enhancers import (
+    CompositeContextAwareEnhancer,
+    ContextAwareEnhancer,
+    LemmaContextAwareEnhancer,
+    PhraseContextAwareEnhancer,
+)
 from presidio_analyzer.input_validation import ConfigurationValidator
 from presidio_analyzer.nlp_engine import NlpEngine, NlpEngineProvider
 from presidio_analyzer.recognizer_registry import RecognizerRegistryProvider
@@ -106,11 +111,13 @@ class AnalyzerEngineProvider:
 
         return analyzer
 
-    def _load_context_aware_enhancer(self) -> Optional[LemmaContextAwareEnhancer]:
+    def _load_context_aware_enhancer(self) -> Optional[ContextAwareEnhancer]:
         """Load the context-aware enhancer from the ``context_aware_enhancer`` section.
 
         Returns None when the section is absent, so that AnalyzerEngine
-        creates its default enhancer.
+        creates its default enhancer. Otherwise returns a composite of the
+        listed ``enhancers``, or of a lemma and a phrase enhancer that share
+        the section's settings.
         """
         if "context_aware_enhancer" not in self.configuration:
             return None
@@ -120,7 +127,17 @@ class AnalyzerEngineProvider:
                 self.configuration["context_aware_enhancer"]
             )
         )
-        return LemmaContextAwareEnhancer(**enhancer_configuration)
+        entries = enhancer_configuration.get("enhancers") or [
+            {"type": "lemma", **enhancer_configuration},
+            {"type": "phrase", **enhancer_configuration},
+        ]
+        enhancer_classes = {
+            "lemma": LemmaContextAwareEnhancer,
+            "phrase": PhraseContextAwareEnhancer,
+        }
+        return CompositeContextAwareEnhancer(
+            [enhancer_classes[entry.pop("type")](**entry) for entry in entries]
+        )
 
     def _load_recognizer_registry(
         self,
