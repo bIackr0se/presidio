@@ -395,3 +395,97 @@ def test_when_multi_word_context_precedes_entity_then_result_passes_threshold(
     assert with_phrase[0].score == pytest.approx(0.85)
     assert lemma_only == []
     assert without_phrase == []
+
+
+class _BaseSettingsEnhancer(_ScoreOnlyEnhancer):
+    """A custom enhancer class whose constructor takes only the base settings."""
+
+    def __init__(
+        self,
+        context_similarity_factor,
+        min_score_with_context_similarity,
+        context_prefix_count,
+        context_suffix_count,
+    ):
+        ContextAwareEnhancer.__init__(
+            self,
+            context_similarity_factor,
+            min_score_with_context_similarity,
+            context_prefix_count,
+            context_suffix_count,
+        )
+
+
+def test_when_default_engine_then_enhancer_settings_are_readable():
+    enhancer = AnalyzerEngine().context_aware_enhancer
+
+    assert isinstance(enhancer, CompositeContextAwareEnhancer)
+    assert enhancer.context_similarity_factor == 0.35
+    assert enhancer.min_score_with_context_similarity == 0.4
+    assert enhancer.context_prefix_count == 5
+    assert enhancer.context_suffix_count == 0
+    assert enhancer.context_matching_mode == "substring"
+
+
+def test_when_enhancers_given_as_classes_then_built_with_composite_settings():
+    composite = CompositeContextAwareEnhancer(
+        [LemmaContextAwareEnhancer, PhraseContextAwareEnhancer, _BaseSettingsEnhancer],
+        context_similarity_factor=0.2,
+        min_score_with_context_similarity=0.5,
+        context_prefix_count=3,
+        context_suffix_count=2,
+        context_matching_mode="whole_word",
+    )
+
+    lemma, phrase, custom = composite.enhancers
+    assert type(lemma) is LemmaContextAwareEnhancer
+    assert type(phrase) is PhraseContextAwareEnhancer
+    assert type(custom) is _BaseSettingsEnhancer
+    for enhancer in (composite, lemma, phrase, custom):
+        assert enhancer.context_similarity_factor == 0.2
+        assert enhancer.min_score_with_context_similarity == 0.5
+        assert enhancer.context_prefix_count == 3
+        assert enhancer.context_suffix_count == 2
+    for enhancer in (composite, lemma, phrase):
+        assert enhancer.context_matching_mode == "whole_word"
+    assert not hasattr(custom, "context_matching_mode")
+
+
+def test_when_enhancer_given_as_instance_then_its_own_settings_win():
+    phrase = PhraseContextAwareEnhancer(
+        context_prefix_count=7, context_matching_mode="whole_word"
+    )
+    composite = CompositeContextAwareEnhancer(
+        [LemmaContextAwareEnhancer, phrase], context_prefix_count=2
+    )
+
+    lemma, same_phrase = composite.enhancers
+    assert same_phrase is phrase
+    assert phrase.context_prefix_count == 7
+    assert phrase.context_matching_mode == "whole_word"
+    assert lemma.context_prefix_count == 2
+    assert lemma.context_matching_mode == "substring"
+
+
+def test_when_composite_settings_given_then_class_children_use_them(
+    spacy_nlp_engine,
+):
+    # "driving licence" is three words before the entity: out of a window of 2
+    recognizer = _recognizer(["driving licence"])
+    text = "My driving licence number is ABC12345"
+    narrow = CompositeContextAwareEnhancer(
+        [LemmaContextAwareEnhancer, PhraseContextAwareEnhancer],
+        context_prefix_count=2,
+    )
+
+    assert _enhance(spacy_nlp_engine, narrow, recognizer, text).score == pytest.approx(
+        0.3
+    )
+    assert _enhance(
+        spacy_nlp_engine, _default(), recognizer, text
+    ).score == pytest.approx(0.65)
+
+
+def test_when_composite_matching_mode_invalid_then_raises():
+    with pytest.raises(ValueError, match="context_matching_mode must be one of"):
+        CompositeContextAwareEnhancer([], context_matching_mode="prefix")

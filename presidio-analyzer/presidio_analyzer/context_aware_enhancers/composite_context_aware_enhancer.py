@@ -1,6 +1,7 @@
 import copy
+import inspect
 import logging
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Type, Union
 
 from presidio_analyzer import EntityRecognizer, RecognizerResult
 from presidio_analyzer.context_aware_enhancers.context_aware_enhancer import (
@@ -23,11 +24,52 @@ class CompositeContextAwareEnhancer(ContextAwareEnhancer):
     enhancers skip that result, so its score is enhanced at most once.
     The results are copied once for all the enhancers.
 
-    :param enhancers: the enhancers to run, in order
+    An enhancer given as a class is built with the composite's settings; an
+    instance is used as is, so its own settings win.
+
+    :param enhancers: the enhancers to run, in order, as instances or classes
+    :param context_similarity_factor: How much to enhance confidence of match entity
+    :param min_score_with_context_similarity: Minimum confidence score
+    :param context_prefix_count: how many words before the entity to match context
+    :param context_suffix_count: how many words after the entity to match context
+    :param context_matching_mode: "substring" or "whole_word", given to the
+    enhancer classes whose constructor takes it
     """
 
-    def __init__(self, enhancers: List[ContextAwareEnhancer]):
-        self.enhancers = list(enhancers)
+    def __init__(
+        self,
+        enhancers: List[Union[ContextAwareEnhancer, Type[ContextAwareEnhancer]]],
+        context_similarity_factor: float = 0.35,
+        min_score_with_context_similarity: float = 0.4,
+        context_prefix_count: int = 5,
+        context_suffix_count: int = 0,
+        context_matching_mode: str = "substring",
+    ):
+        settings = dict(
+            context_similarity_factor=context_similarity_factor,
+            min_score_with_context_similarity=min_score_with_context_similarity,
+            context_prefix_count=context_prefix_count,
+            context_suffix_count=context_suffix_count,
+        )
+        super().__init__(**settings)
+        if context_matching_mode not in ["whole_word", "substring"]:
+            raise ValueError(
+                f"context_matching_mode must be one of: 'whole_word', 'substring'. "
+                f"Got: {context_matching_mode}"
+            )
+        self.context_matching_mode = context_matching_mode
+        self.enhancers = [
+            self._build(enhancer, settings) if isinstance(enhancer, type) else enhancer
+            for enhancer in enhancers
+        ]
+
+    def _build(
+        self, enhancer_class: Type[ContextAwareEnhancer], settings: dict
+    ) -> ContextAwareEnhancer:
+        """Build an enhancer class with the composite's settings."""
+        if "context_matching_mode" in inspect.signature(enhancer_class).parameters:
+            settings = {**settings, "context_matching_mode": self.context_matching_mode}
+        return enhancer_class(**settings)
 
     def enhance_using_context(
         self,

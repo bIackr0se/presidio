@@ -970,6 +970,38 @@ def test_when_context_aware_enhancers_listed_then_engine_runs_them_in_order(
     assert lemma.context_matching_mode == "substring"
 
 
+def test_when_settings_next_to_enhancers_then_they_are_the_list_defaults(
+    tmp_path,
+):
+    analyzer_yaml = _write_context_enhancer_analyzer_conf(
+        tmp_path,
+        context_aware_enhancer={
+            "context_prefix_count": 2,
+            "context_matching_mode": "whole_word",
+            "enhancers": [
+                {"type": "lemma"},
+                {"type": "phrase", "context_suffix_count": 1},
+            ],
+        },
+    )
+
+    composite = (
+        AnalyzerEngineProvider(analyzer_yaml).create_engine().context_aware_enhancer
+    )
+
+    assert composite.context_prefix_count == 2
+    assert composite.context_matching_mode == "whole_word"
+    lemma, phrase = composite.enhancers
+    assert type(lemma) is LemmaContextAwareEnhancer
+    assert type(phrase) is PhraseContextAwareEnhancer
+    for enhancer in composite.enhancers:
+        assert enhancer.context_prefix_count == 2
+        assert enhancer.context_matching_mode == "whole_word"
+        assert enhancer.context_similarity_factor == 0.35
+    assert lemma.context_suffix_count == 0
+    assert phrase.context_suffix_count == 1
+
+
 @pytest.mark.parametrize(
     "context_aware_enhancer, expected_score",
     [

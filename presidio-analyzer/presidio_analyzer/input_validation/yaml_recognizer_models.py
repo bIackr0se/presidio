@@ -252,9 +252,9 @@ class ContextAwareEnhancerConfig(ContextAwareEnhancerSettingsConfig):
     """Validated configuration for the analyzer's context-aware enhancer.
 
     The analyzer runs a ``CompositeContextAwareEnhancer``. Without ``enhancers``,
-    it holds a ``LemmaContextAwareEnhancer`` and a ``PhraseContextAwareEnhancer``,
-    both built with the settings given here. With ``enhancers``, it holds the
-    listed enhancers in order, each with its own settings.
+    it holds a ``LemmaContextAwareEnhancer`` and a ``PhraseContextAwareEnhancer``.
+    With ``enhancers``, it holds the listed enhancers in order. The settings given
+    here apply to every enhancer, and an entry's own settings override them.
 
     :param enhancers: The enhancers to run in order, each with a ``type``
     of "lemma" or "phrase" and its settings.
@@ -270,23 +270,6 @@ class ContextAwareEnhancerConfig(ContextAwareEnhancerSettingsConfig):
             ]
         ]
     ] = Field(None, min_length=1, description="Enhancers to run in order")
-
-    @model_validator(mode="after")
-    def validate_enhancers_or_settings(self):
-        """Reject settings next to ``enhancers``, which would apply to none of them."""
-        if self.enhancers is None:
-            return self
-        settings = sorted(
-            name
-            for name in ContextAwareEnhancerSettingsConfig.model_fields
-            if getattr(self, name) is not None
-        )
-        if settings:
-            raise ValueError(
-                f"{', '.join(settings)} cannot be set next to 'enhancers'; "
-                "set them on each entry of 'enhancers' instead"
-            )
-        return self
 
 
 class PredefinedRecognizerConfig(BaseRecognizerConfig):

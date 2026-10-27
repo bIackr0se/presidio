@@ -131,7 +131,7 @@ class AnalyzerEngine:
                 + " lemma and phrase based enhancer."
             )
             context_aware_enhancer = CompositeContextAwareEnhancer(
-                [LemmaContextAwareEnhancer(), PhraseContextAwareEnhancer()]
+                [LemmaContextAwareEnhancer, PhraseContextAwareEnhancer]
             )
 
         self.context_aware_enhancer = context_aware_enhancer

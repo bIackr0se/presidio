@@ -116,8 +116,9 @@ class AnalyzerEngineProvider:
 
         Returns None when the section is absent, so that AnalyzerEngine
         creates its default enhancer. Otherwise returns a composite of the
-        listed ``enhancers``, or of a lemma and a phrase enhancer that share
-        the section's settings.
+        listed ``enhancers``, or of a lemma and a phrase enhancer. The section's
+        settings apply to every enhancer, and an entry's own settings override
+        them.
         """
         if "context_aware_enhancer" not in self.configuration:
             return None
@@ -127,17 +128,24 @@ class AnalyzerEngineProvider:
                 self.configuration["context_aware_enhancer"]
             )
         )
-        entries = enhancer_configuration.get("enhancers") or [
-            {"type": "lemma", **enhancer_configuration},
-            {"type": "phrase", **enhancer_configuration},
+        entries = enhancer_configuration.pop("enhancers", None) or [
+            {"type": "lemma"},
+            {"type": "phrase"},
         ]
         enhancer_classes = {
             "lemma": LemmaContextAwareEnhancer,
             "phrase": PhraseContextAwareEnhancer,
         }
-        return CompositeContextAwareEnhancer(
-            [enhancer_classes[entry.pop("type")](**entry) for entry in entries]
-        )
+        enhancers = []
+        for entry in entries:
+            enhancer_class = enhancer_classes[entry.pop("type")]
+            # an entry's own settings override the section's settings
+            enhancers.append(
+                enhancer_class(**{**enhancer_configuration, **entry})
+                if entry
+                else enhancer_class
+            )
+        return CompositeContextAwareEnhancer(enhancers, **enhancer_configuration)
 
     def _load_recognizer_registry(
         self,

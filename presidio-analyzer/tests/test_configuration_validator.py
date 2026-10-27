@@ -642,6 +642,19 @@ def test_when_context_aware_enhancers_listed_then_each_keeps_its_own_settings():
     }
 
 
+def test_when_settings_set_next_to_enhancers_then_both_are_kept():
+    config = {
+        "context_suffix_count": 2,
+        "enhancers": [{"type": "lemma"}, {"type": "phrase", "context_suffix_count": 0}],
+    }
+
+    validated = ConfigurationValidator.validate_context_aware_enhancer_configuration(
+        config
+    )
+
+    assert validated == config
+
+
 @pytest.mark.parametrize(
     "enhancer_config, expected_message",
     [
@@ -665,11 +678,6 @@ def test_when_context_aware_enhancers_listed_then_each_keeps_its_own_settings():
         ),
         ({"enhancers": []}, "enhancers: List should have at least 1 item"),
         ({"enhancers": "lemma"}, "enhancers: Input should be a valid list"),
-        (
-            {"enhancers": [{"type": "lemma"}], "context_suffix_count": 2},
-            "context_suffix_count cannot be set next to 'enhancers'; set them on "
-            "each entry of 'enhancers' instead",
-        ),
     ],
 )
 def test_when_context_aware_enhancers_invalid_then_raises_with_message(
