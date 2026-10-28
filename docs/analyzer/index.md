@@ -117,9 +117,6 @@ classDiagram
     AnalyzerEngine *-- ContextAwareEnhancer
     RecognizerRegistry o-- "0..*" EntityRecognizer
     ContextAwareEnhancer <|-- LemmaContextAwareEnhancer
-    ContextAwareEnhancer <|-- PhraseContextAwareEnhancer
-    ContextAwareEnhancer <|-- CompositeContextAwareEnhancer
-    CompositeContextAwareEnhancer o-- "0..*" ContextAwareEnhancer
 
     %% Defining styles
     style RecognizerRegistry fill:#E6F7FF,stroke:#005BAC,stroke-width:2px
@@ -130,8 +127,6 @@ classDiagram
     style StanzaNlpEngine fill:#FFF5E6,stroke:#FFA500,stroke-width:2px
     style ContextAwareEnhancer fill:#E6FFE6,stroke:#008000,stroke-width:2px
     style LemmaContextAwareEnhancer fill:#E6FFE6,stroke:#008000,stroke-width:2px
-    style PhraseContextAwareEnhancer fill:#E6FFE6,stroke:#008000,stroke-width:2px
-    style CompositeContextAwareEnhancer fill:#E6FFE6,stroke:#008000,stroke-width:2px
     style EntityRecognizer fill:#F5F5DC,stroke:#8B4513,stroke-width:2px
     style YourEntityRecognizer fill:#F5F5DC,stroke:#8B4513,stroke-width:2px
     style RecognizerResult fill:#FFF0F5,stroke:#FF69B4,stroke-width:2px
